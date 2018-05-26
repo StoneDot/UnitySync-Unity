@@ -46,4 +46,9 @@ public class UnitySync : MonoBehaviour
     {
         Client.TestConnect();
     }
+
+    private void OnDestroy()
+    {
+        Client.Disconnect();
+    }
 }

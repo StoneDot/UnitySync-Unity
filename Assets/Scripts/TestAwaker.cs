@@ -10,6 +10,16 @@ public class TestAwaker : MonoBehaviour {
 	void Start () {
         var ins = UnitySync.GetInstance();
         Debug.Log(target);
-        ins.Client.PlaceObject(target);
+        StartCoroutine(UpdateObject());
 	}
+
+    IEnumerator UpdateObject()
+    {
+        var ins = UnitySync.GetInstance();
+        while(true)
+        {
+            ins.Client.PlaceObject(target);
+            yield return new WaitForSeconds(5);
+        }
+    }
 }

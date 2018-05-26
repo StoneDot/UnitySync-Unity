@@ -18,8 +18,8 @@ public class WebSocketClient
     private AutoResetEvent objectPushedEvent;
 
     public Uri Uri { get; private set; }
-
-    [Serializable]
+    public Guid Guid { get; private set; }
+    
     private struct PlacedObjectData
     {
         public string Mode;
@@ -34,7 +34,6 @@ public class WebSocketClient
         public GameObject Target;
     }
 
-    [Serializable]
     private struct UpdateObjectData
     {
         public string Mode;
@@ -50,9 +49,17 @@ public class WebSocketClient
         public GameObject Target;
     }
 
+    private struct EnterRoomDataMapper
+    {
+        public string Mode;
+        public string RoomName;
+        public string Guid;
+    }
+
     public WebSocketClient(Uri uri)
     {
         Uri = uri;
+        Guid = Guid.NewGuid();
         client = new ClientWebSocket();
         placedObjects = new ConcurrentQueue<PlacedObjectDataMapper>();
         updatedObjects = new ConcurrentQueue<UpdateObjectDataMapper>();
@@ -70,6 +77,9 @@ public class WebSocketClient
             Debug.Log("Connecting");
             await client.ConnectAsync(Uri, connectToken);
             Debug.Log("Connected");
+            Debug.Log("Entering Room");
+            await EnterRoom();
+            Debug.Log("Entered Room");
 
             while (client.State == WebSocketState.Open)
             {
@@ -133,6 +143,18 @@ public class WebSocketClient
             Rotation = transform.rotation,
             Scale = transform.localScale
         };
+    }
+
+    private Task EnterRoom(string roomName = "broadcast")
+    {
+        var obj = new EnterRoomDataMapper()
+        {
+            Mode = "EnterRoom",
+            RoomName = roomName,
+            Guid = Guid.ToString()
+        };
+        var data = GetByteArray(obj);
+        return client.SendAsync(data, WebSocketMessageType.Text, true, CancellationToken.None);
     }
 
     /// <summary>

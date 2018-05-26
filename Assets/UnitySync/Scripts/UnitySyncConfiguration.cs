@@ -20,11 +20,17 @@ public class UnitySyncConfiguration : ScriptableObject
         get { return port; }
     }
 
-    public Uri Uri { get; private set; }
-
-    public UnitySyncConfiguration()
+    private Uri uri;
+    public Uri Uri
     {
-        Uri = new Uri($"ws://{remoteServer}:{port}");
+        get
+        {
+            if (uri == null)
+            {
+                uri = new Uri($"ws://{remoteServer}:{port}");
+            }
+            return uri;
+        }
     }
-    
+
 }
