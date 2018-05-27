@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 
 public class WebSocketClient
 {
@@ -18,8 +19,8 @@ public class WebSocketClient
     private AutoResetEvent objectPushedEvent;
 
     public Uri Uri { get; private set; }
-    public Guid Guid { get; private set; }
-    
+    public ushort UserId { get; private set; }
+
     private struct PlacedObjectData
     {
         public string Mode;
@@ -49,21 +50,30 @@ public class WebSocketClient
         public GameObject Target;
     }
 
-    private struct EnterRoomDataMapper
+    private struct EnterRoomData
     {
         public string Mode;
         public string RoomName;
-        public string Guid;
     }
 
     public WebSocketClient(Uri uri)
     {
         Uri = uri;
-        Guid = Guid.NewGuid();
+        ResetUserId();
         client = new ClientWebSocket();
         placedObjects = new ConcurrentQueue<PlacedObjectDataMapper>();
         updatedObjects = new ConcurrentQueue<UpdateObjectDataMapper>();
         objectPushedEvent = new AutoResetEvent(false);
+    }
+
+    private void ResetUserId()
+    {
+        var randomByte = new byte[2];
+        using (var rng = new RNGCryptoServiceProvider())
+        {
+            rng.GetBytes(randomByte);
+        }
+        UserId = BitConverter.ToUInt16(randomByte, 0);
     }
 
     public void Connect()
@@ -147,11 +157,10 @@ public class WebSocketClient
 
     private Task EnterRoom(string roomName = "broadcast")
     {
-        var obj = new EnterRoomDataMapper()
+        var obj = new EnterRoomData()
         {
             Mode = "EnterRoom",
             RoomName = roomName,
-            Guid = Guid.ToString()
         };
         var data = GetByteArray(obj);
         return client.SendAsync(data, WebSocketMessageType.Text, true, CancellationToken.None);
