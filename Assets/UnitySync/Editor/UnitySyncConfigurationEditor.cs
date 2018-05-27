@@ -1,20 +1,23 @@
-﻿using UnityEditor;
+﻿using System.IO;
+using UnityEditor;
 using UnityEngine;
 
 public class UnitySyncConfigurationEditor : ScriptableObject
 {
 
+    public const string ServerConfigPath = "Assets/UnitySync/Resources/Configuration/ServerConfiguration.asset";
+
     [MenuItem("UnitySync/Create Configuration")]
     private static void CreateUnitySyncConfigurationInstance()
     {
-        var asset = CreateInstance<UnitySyncConfiguration>();
-        if (!AssetDatabase.IsValidFolder("Assets/UnitySync"))
-            AssetDatabase.CreateFolder("Assets", "UnitySync");
-        if (!AssetDatabase.IsValidFolder("Assets/UnitySync/Resources"))
-            AssetDatabase.CreateFolder("Assets/UnitySync", "Resources");
-        if (!AssetDatabase.IsValidFolder("Assets/UnitySync/Resources/Configuration"))
-            AssetDatabase.CreateFolder("Assets/UnitySync/Resources", "Configuration");
-        AssetDatabase.CreateAsset(asset, "Assets/UnitySync/Resources/Configuration/ServerConfiguration.asset");
+        Debug.Log(Utility.GetDirectoryName(ServerConfigPath));
+        Utility.CreateDirectoryRecursive(Utility.GetDirectoryName(ServerConfigPath));
+        if (!File.Exists(ServerConfigPath))
+        {
+            var asset = CreateInstance<UnitySyncConfiguration>();
+            AssetDatabase.CreateAsset(asset, ServerConfigPath);
+        }
+        LastUsedInstanceId.GenerateResource();
         AssetDatabase.Refresh();
     }
 }

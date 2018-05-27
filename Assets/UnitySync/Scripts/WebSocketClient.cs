@@ -1,13 +1,13 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net.WebSockets;
-using System;
-using UnityEngine;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Text;
-using System.Collections.Concurrent;
-using System.Security.Cryptography;
+using UnityEngine;
 
 public class WebSocketClient
 {
@@ -21,7 +21,9 @@ public class WebSocketClient
     public Uri Uri { get; private set; }
     public ushort UserId { get; private set; }
 
-    private struct PlacedObjectData
+    public event EventHandler<UpdateObjectData> OnObjectUpdated;
+
+    public struct PlacedObjectData
     {
         public string Mode;
         public Vector3 Position;
@@ -35,10 +37,10 @@ public class WebSocketClient
         public GameObject Target;
     }
 
-    private struct UpdateObjectData
+    public struct UpdateObjectData
     {
         public string Mode;
-        public int ID;
+        public uint ID;
         public Vector3 Position;
         public Quaternion Rotation;
         public Vector3 Scale;
@@ -91,6 +93,48 @@ public class WebSocketClient
             await EnterRoom();
             Debug.Log("Entered Room");
 
+            var rxTask = Task.Run(async () =>
+            {
+                const int DefaultBufferSize = 1024;
+                var rxBuff = new byte[DefaultBufferSize];
+                var rxData = new ArraySegment<byte>(rxBuff);
+                var data = new List<byte>(DefaultBufferSize);
+                while (client.State == WebSocketState.Open)
+                {
+                    var result = await client.ReceiveAsync(rxData, CancellationToken.None);
+                    // TODO: 最適化ができるかも
+                    // https://stackoverflow.com/questions/23413068/fast-way-to-copy-an-array-into-a-list
+                    data.AddRange(rxData);
+                    if (!result.EndOfMessage) continue;
+                    switch (result.MessageType)
+                    {
+                        case WebSocketMessageType.Text:
+                            var jsonString = Encoding.UTF8.GetString(data.ToArray(), 0, data.Count);
+                            var mode = ExtractJsonMode(jsonString);
+                            //Debug.Log("JSON come: " + jsonString);
+                            switch (mode)
+                            {
+                                case "PlaceObject":
+                                    var placedData = JsonUtility.FromJson<PlacedObjectData>(jsonString);
+                                    break;
+                                case "UpdateObject":
+                                    var updatedData = JsonUtility.FromJson<UpdateObjectData>(jsonString);
+                                    OnObjectUpdated?.Invoke(this, updatedData);
+                                    break;
+                                default:
+                                    Debug.LogError("Something wrong");
+                                    break;
+                            }
+                            break;
+                        case WebSocketMessageType.Binary:
+                            break;
+                        case WebSocketMessageType.Close:
+                            break;
+                    }
+                    data.Clear();
+                }
+            });
+
             while (client.State == WebSocketState.Open)
             {
                 while (!placedObjects.IsEmpty)
@@ -100,7 +144,6 @@ public class WebSocketClient
                     {
                         var data = GetByteArray(mapper.Data);
                         await client.SendAsync(data, WebSocketMessageType.Text, true, CancellationToken.None);
-                        Debug.Log("Placed");
                     }
                 }
                 while (!updatedObjects.IsEmpty)
@@ -110,17 +153,34 @@ public class WebSocketClient
                     {
                         var data = GetByteArray(mapper.Data);
                         await client.SendAsync(data, WebSocketMessageType.Text, true, CancellationToken.None);
-                        Debug.Log("Updated");
                     }
                 }
                 objectPushedEvent.WaitOne();
             }
+
+            Debug.Log("Waiting finishing rxTask");
+            await rxTask;
+            Debug.Log("Closed websocket connection.");
         });
     }
 
     public void Disconnect()
     {
         client.CloseAsync(WebSocketCloseStatus.NormalClosure, "Normal ending", CancellationToken.None);
+    }
+
+    private static Regex modeRegex = new Regex("\"Mode\":\"([^\"]*?)\"");
+    private string ExtractJsonMode(string jsonString)
+    {
+        var match = modeRegex.Match(jsonString);
+        if (match.Success)
+        {
+            return match.Groups[1].Value;
+        }
+        else
+        {
+            return "None";
+        }
     }
 
     private ArraySegment<byte> GetByteArray<T>(T obj)
@@ -142,7 +202,7 @@ public class WebSocketClient
         };
     }
 
-    private UpdateObjectData GenerateUpdateObjectData(int id, GameObject gameObject)
+    private UpdateObjectData GenerateUpdateObjectData(uint id, GameObject gameObject)
     {
         var transform = gameObject.transform;
         return new UpdateObjectData()
@@ -185,7 +245,7 @@ public class WebSocketClient
     /// </summary>
     /// <param name="id"></param>
     /// <param name="gameObject"></param>
-    public void SendTransform(int id, GameObject gameObject)
+    public void SendTransform(uint id, GameObject gameObject)
     {
         var data = GenerateUpdateObjectData(id, gameObject);
         updatedObjects.Enqueue(new UpdateObjectDataMapper()
