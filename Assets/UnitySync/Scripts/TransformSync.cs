@@ -18,11 +18,17 @@ public class TransformSync : MonoBehaviour
     {
         unitySync = UnitySync.GetInstance();
         unitySync.RegisterTransformSync(this);
+        gameObject.transform.hasChanged = false;
     }
 
     private void Update()
     {
-        unitySync.SendUpdate(this);
+        var transform = gameObject.transform;
+        if (transform.hasChanged)
+        {
+            unitySync.SendUpdate(this);
+            transform.hasChanged = false;
+        }
     }
 
 #if UNITY_EDITOR

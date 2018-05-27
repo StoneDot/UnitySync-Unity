@@ -99,40 +99,50 @@ public class WebSocketClient
                 var rxBuff = new byte[DefaultBufferSize];
                 var rxData = new ArraySegment<byte>(rxBuff);
                 var data = new List<byte>(DefaultBufferSize);
-                while (client.State == WebSocketState.Open)
+                try
                 {
-                    var result = await client.ReceiveAsync(rxData, CancellationToken.None);
-                    // TODO: 最適化ができるかも
-                    // https://stackoverflow.com/questions/23413068/fast-way-to-copy-an-array-into-a-list
-                    data.AddRange(rxData);
-                    if (!result.EndOfMessage) continue;
-                    switch (result.MessageType)
+                    while (client.State == WebSocketState.Open)
                     {
-                        case WebSocketMessageType.Text:
-                            var jsonString = Encoding.UTF8.GetString(data.ToArray(), 0, data.Count);
-                            var mode = ExtractJsonMode(jsonString);
-                            //Debug.Log("JSON come: " + jsonString);
-                            switch (mode)
-                            {
-                                case "PlaceObject":
-                                    var placedData = JsonUtility.FromJson<PlacedObjectData>(jsonString);
-                                    break;
-                                case "UpdateObject":
-                                    var updatedData = JsonUtility.FromJson<UpdateObjectData>(jsonString);
-                                    OnObjectUpdated?.Invoke(this, updatedData);
-                                    break;
-                                default:
-                                    Debug.LogError("Something wrong");
-                                    break;
-                            }
-                            break;
-                        case WebSocketMessageType.Binary:
-                            break;
-                        case WebSocketMessageType.Close:
-                            break;
+                        var result = await client.ReceiveAsync(rxData, CancellationToken.None);
+                        // TODO: 最適化ができるかも
+                        // https://stackoverflow.com/questions/23413068/fast-way-to-copy-an-array-into-a-list
+                        var clippedData = new ArraySegment<byte>(rxData.Array, 0, result.Count);
+                        data.AddRange(clippedData);
+                        if (!result.EndOfMessage) continue;
+                        switch (result.MessageType)
+                        {
+                            case WebSocketMessageType.Text:
+                                var jsonString = Encoding.UTF8.GetString(data.ToArray(), 0, data.Count);
+                                var mode = ExtractJsonMode(jsonString);
+                                //Debug.Log("JSON come: " + jsonString);
+                                switch (mode)
+                                {
+                                    case "PlaceObject":
+                                        var placedData = JsonUtility.FromJson<PlacedObjectData>(jsonString);
+                                        break;
+                                    case "UpdateObject":
+                                        var updatedData = JsonUtility.FromJson<UpdateObjectData>(jsonString);
+                                        OnObjectUpdated?.Invoke(this, updatedData);
+                                        break;
+                                    default:
+                                        Debug.LogError("Something wrong");
+                                        break;
+                                }
+                                break;
+                            case WebSocketMessageType.Binary:
+                                break;
+                            case WebSocketMessageType.Close:
+                                break;
+                        }
+                        data.Clear();
                     }
-                    data.Clear();
                 }
+                catch (Exception e)
+                {
+                    Debug.Log(e.Message);
+                    Debug.Log(e.StackTrace);
+                }
+                Debug.Log("End RX loop");
             });
 
             while (client.State == WebSocketState.Open)

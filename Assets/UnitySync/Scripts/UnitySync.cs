@@ -55,7 +55,7 @@ public class UnitySync : MonoBehaviour
 
     private void Update()
     {
-        while(!updateObjects.IsEmpty)
+        while (!updateObjects.IsEmpty)
         {
             WebSocketClient.UpdateObjectData data;
             var success = updateObjects.TryDequeue(out data);
@@ -64,6 +64,7 @@ public class UnitySync : MonoBehaviour
             transform.position = data.Position;
             transform.rotation = data.Rotation;
             transform.localScale = data.Scale;
+            transform.hasChanged = false;
         }
     }
 
