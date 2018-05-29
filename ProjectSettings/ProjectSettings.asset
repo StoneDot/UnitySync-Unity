@@ -150,6 +150,7 @@ PlayerSettings:
   androidSupportedAspectRatio: 1
   androidMaxAspectRatio: 2.1
   applicationIdentifier:
+    Android: com.StoneDot.UnitySync
     Standalone: com.StoneDot.UnitySync
   buildNumber: {}
   AndroidBundleVersionCode: 1

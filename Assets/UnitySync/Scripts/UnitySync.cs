@@ -60,6 +60,7 @@ public class UnitySync : MonoBehaviour
             WebSocketClient.UpdateObjectData data;
             var success = updateObjects.TryDequeue(out data);
             if (!success) continue;
+            if (!syncTargets.ContainsKey(data.ID)) continue;
             var transform = syncTargets[data.ID].transform;
             transform.position = data.Position;
             transform.rotation = data.Rotation;
@@ -76,6 +77,11 @@ public class UnitySync : MonoBehaviour
     public void RegisterTransformSync(TransformSync transformSync)
     {
         syncTargets.Add(transformSync.InstanceId, transformSync);
+    }
+
+    public void UnregisterTransformSync(TransformSync transformSync)
+    {
+        syncTargets.Remove(transformSync.InstanceId);
     }
 
     public void SendUpdate(TransformSync transformSync)

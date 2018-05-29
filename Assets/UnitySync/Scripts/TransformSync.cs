@@ -31,6 +31,11 @@ public class TransformSync : MonoBehaviour
         }
     }
 
+    private void OnDestroy()
+    {
+        unitySync.UnregisterTransformSync(this);
+    }
+
 #if UNITY_EDITOR
 
     private void Reset()

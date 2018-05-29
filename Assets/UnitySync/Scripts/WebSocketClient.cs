@@ -82,10 +82,8 @@ public class WebSocketClient
     {
         if (client.State == WebSocketState.Connecting) return;
         connectToken = new CancellationToken();
-        var guiContext = SynchronizationContext.Current;
         Task.Run(async () =>
         {
-            var taskContext = SynchronizationContext.Current;
             Debug.Log("Connecting");
             await client.ConnectAsync(Uri, connectToken);
             Debug.Log("Connected");
@@ -139,8 +137,7 @@ public class WebSocketClient
                 }
                 catch (Exception e)
                 {
-                    Debug.Log(e.Message);
-                    Debug.Log(e.StackTrace);
+                    Debug.Log(e.ToString());
                 }
                 Debug.Log("End RX loop");
             });
