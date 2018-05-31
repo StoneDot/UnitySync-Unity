@@ -69,11 +69,6 @@ public class UnitySync : MonoBehaviour
         }
     }
 
-    public void TestConnect()
-    {
-        client.TestConnect();
-    }
-
     public void RegisterTransformSync(TransformSync transformSync)
     {
         syncTargets.Add(transformSync.InstanceId, transformSync);

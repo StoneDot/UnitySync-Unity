@@ -1,25 +1,28 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using WebSocketSharp;
 
-public class WebSocketClient
+public class WebSocketClient : IDisposable
 {
-    private ClientWebSocket client;
-    private CancellationToken connectToken;
+    private WebSocket ws;
 
     private ConcurrentQueue<PlacedObjectDataMapper> placedObjects;
     private ConcurrentQueue<UpdateObjectDataMapper> updatedObjects;
     private AutoResetEvent objectPushedEvent;
+    private bool terminate;
+    private bool needReconnect;
 
     public Uri Uri { get; private set; }
     public ushort UserId { get; private set; }
+
+    public int TimeoutMilliseconds { get; set; } = 3000;
 
     public event EventHandler<UpdateObjectData> OnObjectUpdated;
 
@@ -62,10 +65,11 @@ public class WebSocketClient
     {
         Uri = uri;
         ResetUserId();
-        client = new ClientWebSocket();
         placedObjects = new ConcurrentQueue<PlacedObjectDataMapper>();
         updatedObjects = new ConcurrentQueue<UpdateObjectDataMapper>();
         objectPushedEvent = new AutoResetEvent(false);
+        terminate = false;
+        needReconnect = false;
     }
 
     private void ResetUserId()
@@ -80,77 +84,83 @@ public class WebSocketClient
 
     public void Connect()
     {
-        if (client.State == WebSocketState.Connecting) return;
-        connectToken = new CancellationToken();
-        Task.Run(async () =>
+        Task.Run(() =>
         {
-            Debug.Log("Connecting");
-            await client.ConnectAsync(Uri, connectToken);
-            Debug.Log("Connected");
-            Debug.Log("Entering Room");
-            await EnterRoom();
-            Debug.Log("Entered Room");
-
-            var rxTask = Task.Run(async () =>
+            while (!terminate)
             {
-                const int DefaultBufferSize = 1024;
-                var rxBuff = new byte[DefaultBufferSize];
-                var rxData = new ArraySegment<byte>(rxBuff);
-                var data = new List<byte>(DefaultBufferSize);
-                try
-                {
-                    while (client.State == WebSocketState.Open)
-                    {
-                        var result = await client.ReceiveAsync(rxData, CancellationToken.None);
-                        // TODO: 最適化ができるかも
-                        // https://stackoverflow.com/questions/23413068/fast-way-to-copy-an-array-into-a-list
-                        var clippedData = new ArraySegment<byte>(rxData.Array, 0, result.Count);
-                        data.AddRange(clippedData);
-                        if (!result.EndOfMessage) continue;
-                        switch (result.MessageType)
-                        {
-                            case WebSocketMessageType.Text:
-                                var jsonString = Encoding.UTF8.GetString(data.ToArray(), 0, data.Count);
-                                var mode = ExtractJsonMode(jsonString);
-                                //Debug.Log("JSON come: " + jsonString);
-                                switch (mode)
-                                {
-                                    case "PlaceObject":
-                                        var placedData = JsonUtility.FromJson<PlacedObjectData>(jsonString);
-                                        break;
-                                    case "UpdateObject":
-                                        var updatedData = JsonUtility.FromJson<UpdateObjectData>(jsonString);
-                                        OnObjectUpdated?.Invoke(this, updatedData);
-                                        break;
-                                    default:
-                                        Debug.LogError("Something wrong");
-                                        break;
-                                }
-                                break;
-                            case WebSocketMessageType.Binary:
-                                break;
-                            case WebSocketMessageType.Close:
-                                break;
-                        }
-                        data.Clear();
-                    }
-                }
-                catch (Exception e)
-                {
-                    Debug.Log(e.ToString());
-                }
-                Debug.Log("End RX loop");
-            });
+                needReconnect = false;
 
-            while (client.State == WebSocketState.Open)
+                Debug.Log($"Connecting: {Uri.AbsoluteUri}");
+                ws = new WebSocket(Uri.AbsoluteUri);
+                ws.OnOpen += (sender, e) =>
+                {
+                    Debug.Log("Connected WebSocket");
+                };
+                ws.OnClose += (sender, e) =>
+                {
+                    Debug.Log("Closed WebSocket");
+
+                    needReconnect = true;
+                    objectPushedEvent.Set();
+                };
+                ws.OnError += (sender, e) =>
+                {
+                    Debug.Log("Error occur");
+                    Debug.Log(e.Exception.ToString());
+                };
+                ws.OnMessage += OnMessage;
+
+                Debug.Log("Start connect");
+                ws.Connect();
+                Debug.Log("End connect");
+
+                EnterRoom();
+
+                SendingLoop();
+            }
+            Debug.Log("Finish client");
+        });
+    }
+
+    private void OnMessage(object sender, MessageEventArgs e)
+    {
+        if (e.IsText)
+        {
+            var mode = ExtractJsonMode(e.Data);
+            switch (mode)
+            {
+                case "PlaceObject":
+                    var placedData = JsonUtility.FromJson<PlacedObjectData>(e.Data);
+                    break;
+                case "UpdateObject":
+                    var updatedData = JsonUtility.FromJson<UpdateObjectData>(e.Data);
+                    OnObjectUpdated?.Invoke(this, updatedData);
+                    break;
+                default:
+                    Debug.LogError("Something wrong");
+                    break;
+            }
+        }
+        else if (e.IsBinary)
+        {
+        }
+    }
+
+    private void SendingLoop()
+    {
+        try
+        {
+            while (ws.IsAlive && !needReconnect)
             {
                 while (!placedObjects.IsEmpty)
                 {
                     PlacedObjectDataMapper mapper;
                     if (placedObjects.TryDequeue(out mapper))
                     {
-                        var data = GetByteArray(mapper.Data);
-                        await client.SendAsync(data, WebSocketMessageType.Text, true, CancellationToken.None);
+                        if (ws.IsAlive)
+                        {
+                            ws.SendAsync(JsonUtility.ToJson(mapper.Data), (c) => { });
+                        }
                     }
                 }
                 while (!updatedObjects.IsEmpty)
@@ -158,22 +168,29 @@ public class WebSocketClient
                     UpdateObjectDataMapper mapper;
                     if (updatedObjects.TryDequeue(out mapper))
                     {
-                        var data = GetByteArray(mapper.Data);
-                        await client.SendAsync(data, WebSocketMessageType.Text, true, CancellationToken.None);
+                        if (ws.IsAlive)
+                        {
+                            ws.SendAsync(JsonUtility.ToJson(mapper.Data), (c) => { });
+                        }
                     }
                 }
                 objectPushedEvent.WaitOne();
             }
+        }
+        catch (Exception e)
+        {
+            Debug.Log(e.ToString());
 
-            Debug.Log("Waiting finishing rxTask");
-            await rxTask;
-            Debug.Log("Closed websocket connection.");
-        });
+            // Force ListeningLoop to quit
+            needReconnect = true;
+        }
+        Debug.Log("End TX loop");
     }
 
     public void Disconnect()
     {
-        client.CloseAsync(WebSocketCloseStatus.NormalClosure, "Normal ending", CancellationToken.None);
+        ws.Close();
+        terminate = true;
     }
 
     private static Regex modeRegex = new Regex("\"Mode\":\"([^\"]*?)\"");
@@ -222,15 +239,23 @@ public class WebSocketClient
         };
     }
 
-    private Task EnterRoom(string roomName = "broadcast")
+    private void EnterRoom(string roomName = "broadcast")
     {
         var obj = new EnterRoomData()
         {
             Mode = "EnterRoom",
             RoomName = roomName,
         };
-        var data = GetByteArray(obj);
-        return client.SendAsync(data, WebSocketMessageType.Text, true, CancellationToken.None);
+        Debug.Log($"Entering room ({roomName})");
+        if (ws.IsAlive)
+        {
+            ws.Send(JsonUtility.ToJson(obj));
+            Debug.Log($"Entered room ({roomName})");
+        }
+        else
+        {
+            Debug.Log($"Failed to enter room ({roomName})");
+        }
     }
 
     /// <summary>
@@ -263,35 +288,8 @@ public class WebSocketClient
         objectPushedEvent.Set();
     }
 
-    public void TestConnect()
+    public void Dispose()
     {
-        Task.Run(async () =>
-        {
-            Debug.Log("Starting connect");
-            Debug.Log("State: " + client.State);
-            var cancellationToken = new CancellationToken();
-            Debug.Log("Support protocol: " + client.SubProtocol);
-            var task = client.ConnectAsync(Uri, cancellationToken);
-            Debug.Log("Connecting");
-            Debug.Log("State: " + client.State);
-            await task;
-            Debug.Log("Connected");
-            Debug.Log("State: " + client.State);
-            string message = "Hello world!";
-            var dataBytes = System.Text.Encoding.UTF8.GetBytes(message);
-            var data = new System.ArraySegment<byte>(dataBytes);
-            var task2 = client.SendAsync(data, WebSocketMessageType.Text, true, cancellationToken);
-            Debug.Log("Sendding");
-            Debug.Log("State: " + client.State);
-            await task2;
-            Debug.Log("Sended");
-            Debug.Log("State: " + client.State);
-            var task3 = client.CloseAsync(WebSocketCloseStatus.NormalClosure, "Normal ending", cancellationToken);
-            Debug.Log("Closing");
-            Debug.Log("State: " + client.State);
-            await task3;
-            Debug.Log("Closed");
-            Debug.Log("State: " + client.State);
-        });
+        ws.Close();
     }
 }
