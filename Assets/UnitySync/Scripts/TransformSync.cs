@@ -36,14 +36,10 @@ public class TransformSync : MonoBehaviour
         unitySync.UnregisterTransformSync(this);
     }
 
-#if UNITY_EDITOR
-
     private void Reset()
     {
         LastUsedInstanceId.IncrementUsedId();
         _instanceId = LastUsedInstanceId.GetLastUsedId();
         defaultPlaced = true;
     }
-
-#endif
 }
